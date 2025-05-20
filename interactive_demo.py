@@ -16,24 +16,19 @@ class InteractiveDemo:
         """Initialize the interactive demo"""
         self.data_dir, self.state_dir = self._create_demo_directories()
         
-        # Default parameters
         self.extraction_method = KeywordMethod.CUSTOM
         self.max_keywords = 100
-        self.qdrant_location = ":memory:"  # Use in-memory database for demo
+        self.qdrant_location = ":memory:" # in-memory
         self.collection_name = "demo_documents"
         
-        # Initialize extractor with default settings
         self.extractor = None
         self.reset_extractor()
         
-        # Track processed documents
         self.processed_docs = set()
         
-        # Store documents
         self.documents = {}
     
     def _create_demo_directories(self):
-        """Create necessary directories for the demo"""
         data_dir = Path("data")
         data_dir.mkdir(exist_ok=True)
         
@@ -43,8 +38,6 @@ class InteractiveDemo:
         return data_dir, state_dir
     
     def reset_extractor(self):
-        """Reset the extractor with current settings"""
-        # Create a completely new extractor instance with current settings
         self.extractor = KeywordExtractor(
             method=self.extraction_method,
             max_keywords=self.max_keywords,
@@ -52,7 +45,6 @@ class InteractiveDemo:
             qdrant_collection_name=self.collection_name
         )
         
-        # Also clear any document tracking in the demo
         self.processed_docs = set()
     
     def change_extraction_method(self, method_name: str):
@@ -73,17 +65,13 @@ class InteractiveDemo:
         
         self.extraction_method = method_map[method_name.lower()]
         
-        # Reset the extractor to clear all previously extracted keywords
         self.reset_extractor()
-        
-        # Clear processed documents tracking since we need to reprocess with new method
         self.processed_docs = set()
         
         print(f"Changed extraction method to: {method_name}")
         print("Previous keywords have been cleared. Please reprocess your documents.")
     
     def load_warning_letters(self, csv_file_path):
-        """Load warning letters from a CSV file"""
         csv_path = Path(csv_file_path)
         if not csv_path.exists():
             print(f"File not found: {csv_file_path}")
@@ -97,7 +85,6 @@ class InteractiveDemo:
             with open(csv_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 for i, row in enumerate(reader):
-                    # Create a unique document ID based on company name and date
                     company = row.get('company_name', '').strip()
                     date = row.get('letter_issue_date', '').strip()
                     content = row.get('warning_letter_content', '').strip()
@@ -105,7 +92,6 @@ class InteractiveDemo:
                     if not content:
                         continue
                         
-                    # Create a document ID
                     doc_id = f"letter_{i+1}"
                     if company and date:
                         doc_id = f"{company}_{date}".replace(' ', '_')
@@ -129,7 +115,6 @@ class InteractiveDemo:
         print(f"Processing {len(self.documents)} documents...")
         start_time = time.time()
         
-        # If the extraction method has changed, make sure to reprocess everything
         if self.extraction_method != self.extractor.method:
             print(f"Extraction method changed to {self.extraction_method.value}. Resetting extractor...")
             self.reset_extractor()
@@ -144,7 +129,6 @@ class InteractiveDemo:
         return results
     
     def process_custom_document(self, doc_id: str, text: str):
-        """Process a custom document"""
         print(f"Processing document: {doc_id}")
         start_time = time.time()
         
@@ -157,7 +141,6 @@ class InteractiveDemo:
         return keywords
     
     def compare_methods(self, text: str, doc_id: str = "comparison_doc"):
-        """Compare all keyword extraction methods on the same text"""
         print("\n" + "="*50)
         print("KEYWORD EXTRACTION METHOD COMPARISON")
         print("="*50)
@@ -183,12 +166,10 @@ class InteractiveDemo:
             for idx, keyword in enumerate(keywords, 1):
                 print(f"  {idx}. {keyword}")
         
-        # Reset to original method
         self.extractor.set_extraction_method(original_method)
         return results
     
     def show_top_keywords(self, n: int = 10):
-        """Show the top keywords across all documents"""
         top_keywords = self.extractor.get_top_keywords(n)
         
         print("\nTop keywords across all documents:")
@@ -197,7 +178,6 @@ class InteractiveDemo:
             print(f"{idx}. {keyword}: {count}")
     
     def search_similar_documents(self, query: str, limit: int = 3):
-        """Search for documents similar to the query"""
         print(f"\nSearching for documents similar to: '{query}'")
         print("-"*40)
         
@@ -216,7 +196,6 @@ class InteractiveDemo:
             print()
     
     def get_documents_with_keyword(self, keyword: str, limit: int = 5):
-        """Get documents containing a specific keyword"""
         print(f"\nDocuments containing keyword: '{keyword}'")
         print("-"*40)
         
@@ -230,7 +209,6 @@ class InteractiveDemo:
             print(f"{idx}. {doc_id}")
     
     def reprocess_documents(self):
-        """Reprocess all documents with current extraction method"""
         print("\nReprocessing all documents with current extraction method...")
         start_time = time.time()
         
@@ -243,7 +221,6 @@ class InteractiveDemo:
         return results
     
     def save_current_state(self):
-        """Save the current state to a file"""
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         filepath = self.state_dir / f"extractor_state_{timestamp}.pkl"
         
@@ -253,13 +230,11 @@ class InteractiveDemo:
         return filepath
     
     def load_state(self, filepath: str):
-        """Load a saved state"""
         try:
             self.extractor.load_state(filepath)
             self.extraction_method = self.extractor.method
             print(f"State loaded from: {filepath}")
             
-            # Update processed docs
             self.processed_docs = set(self.extractor.document_keywords.keys())
             
             return True
@@ -268,7 +243,6 @@ class InteractiveDemo:
             return False
     
     def show_document_keywords(self, doc_id: str, n: int = 10):
-        """Show the top keywords for a specific document"""
         if not self.processed_docs:
             print("No documents have been processed yet.")
             return
@@ -287,13 +261,11 @@ class InteractiveDemo:
         for idx, keyword in enumerate(keywords, 1):
             print(f"{idx}. {keyword}")
         
-        # Show a preview of the document if available
         if doc_id in self.documents:
             preview = self.documents[doc_id][:150] + "..." if len(self.documents[doc_id]) > 150 else self.documents[doc_id]
             print(f"\nDocument preview: \n{preview}")
 
     def menu(self):
-        """Display the interactive menu"""
         while True:
             print("\n" + "="*50)
             print("KEYWORD EXTRACTION INTERACTIVE DEMO")
@@ -350,7 +322,7 @@ class InteractiveDemo:
                 if not self.processed_docs:
                     print("No documents have been processed yet.")
                 else:
-                    # If there are too many documents, just show a count
+                    # Show a count if there are too many documents
                     if len(self.processed_docs) > 20:
                         print(f"There are {len(self.processed_docs)} processed documents.")
                         doc_id = input("Enter document ID: ")
@@ -396,7 +368,6 @@ class InteractiveDemo:
                 print("Invalid choice. Please try again.")
 
 def main():
-    """Main entry point for the demo"""
     parser = argparse.ArgumentParser(description="Keyword Extraction Interactive Demo")
     parser.add_argument("--method", type=str, default="custom", 
                       help="Initial extraction method (custom, tfidf, textrank, rake, yake, kpminer)")
@@ -404,11 +375,9 @@ def main():
     
     demo = InteractiveDemo()
     
-    # Set initial extraction method if specified
     if args.method:
         demo.change_extraction_method(args.method)
     
-    # Start the interactive menu
     demo.menu()
 
 if __name__ == "__main__":
