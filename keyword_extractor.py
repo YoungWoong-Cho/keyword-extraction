@@ -14,13 +14,10 @@ import uuid
 import hashlib
 import ssl
 import sys
-
-# For vector database
 import qdrant_client
 from qdrant_client.http import models as qdrant_models
 from sentence_transformers import SentenceTransformer
 
-# Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -40,18 +37,7 @@ class KeywordExtractor:
                  min_keyword_freq: int = 2,
                  qdrant_location: str = ":memory:",
                  qdrant_collection_name: str = "documents"):
-        """
-        Initialize the KeywordExtractor with specified parameters.
-        
-        Args:
-            method: The keyword extraction method to use
-            model_name: The sentence transformer model to use for embeddings
-            max_keywords: Maximum number of keywords to maintain in the global set
-            min_keyword_freq: Minimum frequency for a term to be considered a keyword
-            qdrant_location: Location of Qdrant database (use :memory: for in-memory)
-            qdrant_collection_name: Name of the Qdrant collection
-        """
-        # Fix SSL certificate issues (common on macOS)
+        # Fix SSL certificate issue for macOS
         try:
             _create_unverified_https_context = ssl._create_unverified_context
         except AttributeError:
@@ -59,7 +45,6 @@ class KeywordExtractor:
         else:
             ssl._create_default_https_context = _create_unverified_https_context
             
-        # Download necessary NLTK data
         try:
             nltk.data.find('corpora/stopwords')
             nltk.data.find('tokenizers/punkt')
@@ -73,7 +58,6 @@ class KeywordExtractor:
                 logger.error(f"Error downloading NLTK data: {e}")
                 logger.info("You may need to manually install NLTK data. See https://www.nltk.org/data.html")
             
-        # Initialize NLP components
         try:
             self.nlp = spacy.load('en_core_web_sm')
         except OSError:
@@ -90,26 +74,22 @@ class KeywordExtractor:
                               "when", "where", "how", "who", "which", "this", "that", "to", "of", 
                               "in", "for", "with", "on", "by", "at", "from"}
         
-        # Set extraction method
         self.method = method
         
-        # Initialize embedding model
         self.embedding_model = SentenceTransformer(model_name)
         self.embedding_dim = self.embedding_model.get_sentence_embedding_dimension()
         
-        # Initialize vector DB
         self.qdrant_client = qdrant_client.QdrantClient(location=qdrant_location)
         self._initialize_collection(qdrant_collection_name)
         self.collection_name = qdrant_collection_name
         
-        # Keywords management
         self.max_keywords = max_keywords
         self.min_keyword_freq = min_keyword_freq
-        self.global_keywords = {}  # Track keyword frequencies
-        self.document_keywords = {}  # Map document IDs to their keywords
-        self.keyword_to_docs = {}  # Map keywords to documents containing them
+        self.global_keywords = {}
+        self.document_keywords = {}
+        self.keyword_to_docs = {}
         
-        # TF-IDF for keyword extraction
+        # TF-IDF vectorizer
         self.tfidf_vectorizer = TfidfVectorizer(
             max_features=2000,
             stop_words='english',
@@ -118,25 +98,25 @@ class KeywordExtractor:
             min_df=2
         )
         self.tfidf_fitted = False
-        self.document_corpus = {}  # Store document texts for TF-IDF training
+        self.document_corpus = {}
         
-        # KP-Miner corpus statistics
-        self.term_document_freq = {}  # Number of documents containing each term
-        self.corpus_size = 0  # Number of documents in corpus
+        # KP-Miner variables
+        self.term_document_freq = {}
+        self.corpus_size = 0
         
-        # Initialize TextRank components
+        # TextRank variables
         self.window_size = 4
         self.edge_weight = 1.0
         
-        # Initialize RAKE components
+        # RAKE variables
         self.rake_min_chars = 3
         self.rake_max_words = 3
         
-        # Initialize YAKE components
+        # YAKE variables
         self.yake_max_ngram_size = 3
         self.yake_deduplication_threshold = 0.9
         
-        # Initialize KP Miner components
+        # KP Miner variables
         self.kpminer_min_df = 2
         self.kpminer_max_df = 0.8
         
@@ -170,17 +150,6 @@ class KeywordExtractor:
                 logger.error(f"Failed to create collection: {e2}")
     
     def extract_keywords(self, text: str, top_n: int = 10) -> List[str]:
-        """
-        Extract keywords from a single document using the selected method.
-        
-        Args:
-            text: The document text
-            top_n: Number of keywords to extract
-            
-        Returns:
-            List of extracted keywords
-        """
-        # Handle empty or very short texts
         if not text or len(text.strip()) < 3:
             return []
             
@@ -202,7 +171,6 @@ class KeywordExtractor:
                 return self._extract_keywords_custom(text, top_n)
         except Exception as e:
             logger.error(f"Error extracting keywords with method {self.method}: {e}")
-            # Fall back to custom method if any other method fails
             try:
                 return self._extract_keywords_custom(text, top_n)
             except Exception as e2:
@@ -211,7 +179,6 @@ class KeywordExtractor:
     
     def _extract_keywords_custom(self, text: str, top_n: int = 10) -> List[str]:
         """Custom keyword extraction method using spaCy"""
-        # Preprocess text
         doc = self.nlp(text.lower())
         
         # Filter tokens - keep only nouns, verbs, adjectives
@@ -230,7 +197,7 @@ class KeywordExtractor:
         if not candidates:
             return []
             
-        # Count frequencies for ranking
+        # Count frequencies
         keyword_counts = {}
         for kw in candidates:
             if kw in keyword_counts:
@@ -245,26 +212,16 @@ class KeywordExtractor:
         return keywords
     
     def _extract_keywords_tfidf(self, text: str, top_n: int = 10) -> List[str]:
-        """Extract keywords using TF-IDF approach"""        
         try:
-            # If we don't have a fitted vectorizer yet, use custom method as fallback
+            # Custom method as fallback
             if not self.tfidf_fitted or len(self.document_corpus) < 2:
                 logger.warning("TF-IDF vectorizer not fitted with multiple documents yet. Falling back to custom method.")
                 return self._extract_keywords_custom(text, top_n)
             
-            # Transform the new document
             text_vector = self.tfidf_vectorizer.transform([text])
-            
-            # Get feature names
             feature_names = self.tfidf_vectorizer.get_feature_names_out()
-            
-            # Get scores for the document
             scores = zip(feature_names, text_vector.toarray()[0])
-            
-            # Sort by score
             sorted_scores = sorted(scores, key=lambda x: x[1], reverse=True)
-            
-            # Get top keywords
             keywords = [word for word, score in sorted_scores[:top_n]]
             
             return keywords
@@ -274,13 +231,11 @@ class KeywordExtractor:
             return self._extract_keywords_custom(text, top_n)
     
     def _extract_keywords_textrank(self, text: str, top_n: int = 10) -> List[str]:
-        """Extract keywords using TextRank algorithm"""
-        # For very short texts, fall back to custom method
+        # Fall back to custom method for very short texts
         if len(text.split()) < 5:
             return self._extract_keywords_custom(text, top_n)
             
         try:
-            # Preprocess text
             doc = self.nlp(text.lower())
             
             # Keep only nouns and adjectives as nodes
@@ -289,11 +244,11 @@ class KeywordExtractor:
                     token.text not in self.stop_words and
                     len(token.text) > 2]
             
-            # If not enough nodes, fall back to custom method
+            # Fall back to custom method if not enough nodes
             if len(nodes) < 3:
                 return self._extract_keywords_custom(text, top_n)
-                
-            # Build graph: add edges between words that co-occur in a window
+
+            # Build graph
             graph = {}
             for i, node in enumerate(nodes):
                 if node not in graph:
@@ -361,37 +316,31 @@ class KeywordExtractor:
             return self._extract_keywords_custom(text, top_n)
     
     def _extract_keywords_rake(self, text: str, top_n: int = 10) -> List[str]:
-        """Extract keywords using RAKE (Rapid Automatic Keyword Extraction)"""
-        # For very short texts, fall back to custom method
+        # Fall back to custom method for very short texts
         if len(text.split()) < 5:
             return self._extract_keywords_custom(text, top_n)
             
         try:
-            # Clean text - remove punctuation and convert to lowercase
             text = text.lower()
             
             # Replace punctuation with spaces
             text = re.sub(r'[^\w\s]', ' ', text)
             
-            # Split text by stop words to get candidate phrases
-            # First, create a regex pattern of stop words
+            # Get candidate phrases
+            # Create a regex pattern of stop words
             stop_words_pattern = r'\b(' + r'|'.join(self.stop_words) + r')\b'
             
-            # Split the text by stop words or punctuation
-            # This gives us phrases where stop words act as delimiters
+            # Split the text by stop words/punctuations
             candidate_chunks = re.split(stop_words_pattern, text)
             
             # Clean the chunks and remove any that are empty or too short
             phrases = []
             for chunk in candidate_chunks:
-                # Clean extra whitespace
                 chunk = re.sub(r'\s+', ' ', chunk).strip()
-                
-                # Add valid phrases
                 if chunk and len(chunk) >= self.rake_min_chars:
                     phrases.append(chunk)
             
-            # If not enough phrases, fall back to custom method
+            # Fall back to custom method if not enough phrases
             if len(phrases) < 2:
                 return self._extract_keywords_custom(text, top_n)
             
@@ -402,7 +351,7 @@ class KeywordExtractor:
                 len(phrase.split()) <= self.rake_max_words
             ]
             
-            # If still not enough phrases, fall back to custom method
+            # Fall back to custom method if still not enough phrases
             if not phrases:
                 return self._extract_keywords_custom(text, top_n)
             
@@ -442,7 +391,6 @@ class KeywordExtractor:
             return self._extract_keywords_custom(text, top_n)
     
     def _extract_keywords_yake(self, text: str, top_n: int = 10) -> List[str]:
-        """Extract keywords using YAKE (Yet Another Keyword Extractor)"""
         # For very short texts, fall back to custom method
         if len(text.split()) < 5:
             return self._extract_keywords_custom(text, top_n)
@@ -501,29 +449,30 @@ class KeywordExtractor:
                                 
                                 candidates_context[candidate].update(context)
             
-            # Calculate scores - lower is better in YAKE
+            # Calculate scores
+            # NOTE: Lower is better
             scores = {}
             for candidate, frequency in tf.items():
                 # Term frequency component
                 tf_component = frequency
                 
-                # Position component (not fully implemented, using a placeholder)
+                # Position component (use placeholder for now)
                 position = 1.0
                 
                 # Context component
                 context_size = len(candidates_context.get(candidate, set()))
                 context_component = 1.0 / max(1, context_size)
                 
-                # Final score (lower is better in YAKE)
+                # Final score
                 scores[candidate] = context_component / (tf_component * position)
             
-            # Sort by score (ascending since lower is better)
+            # Sort by score (ascending)
             sorted_candidates = sorted(scores.items(), key=lambda x: x[1])
             
             # Get top keywords
             keywords = [candidate for candidate, score in sorted_candidates[:top_n]]
             
-            # Remove duplicate keywords (substrings)
+            # Remove duplicate keywords
             final_keywords = []
             for kw in keywords:
                 if not any(kw in other and kw != other for other in final_keywords):
@@ -862,29 +811,10 @@ class KeywordExtractor:
                                                 if k in self.global_keywords}
     
     def get_top_keywords(self, n: int = 10) -> List[Tuple[str, int]]:
-        """
-        Get the top N keywords across all documents.
-        
-        Args:
-            n: Number of top keywords to return
-            
-        Returns:
-            List of (keyword, frequency) tuples
-        """
         sorted_keywords = sorted(self.global_keywords.items(), key=lambda x: x[1], reverse=True)
         return sorted_keywords[:n]
     
     def find_similar_documents(self, text: str, limit: int = 10) -> List[Dict]:
-        """
-        Find documents similar to the provided text.
-        
-        Args:
-            text: Query text
-            limit: Maximum number of results to return
-            
-        Returns:
-            List of similar documents with their metadata
-        """
         # Generate query embedding
         query_vector = self.embedding_model.encode(text).tolist()
         
